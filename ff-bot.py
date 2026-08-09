@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-🎮 FF ULTRA PROXY BOT - RENDER READY
+🎮 FF ULTRA PROXY BOT - RAILWAY READY
 - Single session per user
+- Hardcoded configuration
 - localconfig.json method
-- All proxy headers stripped
 """
 
 import os, sys, json, time, random, string, base64, hashlib, threading, re, logging, socket
@@ -15,6 +15,17 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 import requests, urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# ==================== HARDCODED CONFIG ====================
+# ⚠️ CHANGE THESE VALUES BEFORE DEPLOYING ⚠️
+BOT_TOKEN = "8700162861:AAEWqnAGTKB4Nofx133IS2qFHKmu6zfo0PM"  # Your bot token from @BotFather
+PUBLIC_URL = "https://ff-ultra-proxy.up.railway.app"  # Your Railway app URL (change after deploy)
+API_URL = "http://metro.proxy.rlwy.net:18992/jwt"
+
+CLIENT_SECRET = "2ee44819e9b4598845141067b281621874d0d5d7af9d8f7e00c1e54715b7d1e3"
+PROXY_PORT = int(os.environ.get("PORT", 5031))
+AES_KEY = b'Yg&tc%DEuh6%Zc^8'
+AES_IV = b'6oyZDr22E3ychjM%'
 
 # ==================== IMPORT PB2 FILES ====================
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'Pb2'))
@@ -28,18 +39,6 @@ try:
 except ImportError as e:
     print(f"⚠️ PB2 import error: {e}")
     USE_PB2 = False
-
-# ==================== CONFIG ====================
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8700162861:AAEWqnAGTKB4Nofx133IS2qFHKmu6zfo0PM")
-CLIENT_SECRET = "2ee44819e9b4598845141067b281621874d0d5d7af9d8f7e00c1e54715b7d1e3"
-PROXY_PORT = int(os.environ.get("PORT", 5031))
-AES_KEY = b'Yg&tc%DEuh6%Zc^8'
-AES_IV = b'6oyZDr22E3ychjM%'
-API_URL = os.environ.get("API_URL", "http://metro.proxy.rlwy.net:18992/jwt")
-
-# For Render, use the public URL
-PUBLIC_URL = os.environ.get("PUBLIC_URL", f"https://your-app-name.onrender.com")
-LOCAL_IP = "0.0.0.0"
 
 print(f"📡 Running on port: {PROXY_PORT}")
 print(f"📡 Public URL: {PUBLIC_URL}")
@@ -59,7 +58,6 @@ def get_random_device():
 
 # ==================== STRIP PROXY HEADERS ====================
 def strip_proxy_headers(headers):
-    """Remove ALL proxy detection headers"""
     PROXY_HEADERS = [
         'Via', 'X-Forwarded-For', 'X-Forwarded-Proto', 'X-Forwarded-Host',
         'X-Real-IP', 'X-Proxy-ID', 'Forwarded', 'Proxy-Connection',
@@ -301,7 +299,6 @@ def proxy_handler(path=""):
     session_data = sessions[session_id]
     device = get_random_device()
     
-    # ============ MAJOR LOGIN ============
     if "MajorLogin" in path:
         if not session_data.get('open_id'):
             return jsonify({"error": "No open_id"}), 400
@@ -351,7 +348,6 @@ def proxy_handler(path=""):
             print(f"[Proxy] MajorLogin error: {e}")
             return jsonify({"error": str(e)}), 500
     
-    # ============ GET LOGIN DATA ============
     elif "GetLoginData" in path:
         if not session_data.get('jwt_token'):
             return jsonify({"error": "No JWT"}), 400
@@ -394,15 +390,12 @@ def proxy_handler(path=""):
             print(f"[Proxy] GetLoginData error: {e}")
             return jsonify({"error": str(e)}), 500
     
-    # ============ GET ACCOUNT BRIEF INFO ============
     elif "GetAccountBriefInfoBeforeLogin" in path:
         return Response(status=200)
     
-    # ============ PING ============
     elif "Ping" in path:
         return Response(status=200)
     
-    # ============ ANY OTHER REQUEST ============
     else:
         print(f"[Proxy] Unknown endpoint: {path}")
         return Response(status=200)
@@ -420,7 +413,6 @@ def create_session():
     if not access_token:
         return jsonify({"error": "access_token required"}), 400
     
-    # Check if user already has an active session
     if user_id and user_id in user_sessions:
         return jsonify({
             "status": "error",
@@ -439,11 +431,9 @@ def create_session():
         'created': datetime.now().isoformat()
     }
     
-    # Store user session mapping
     if user_id:
         user_sessions[user_id] = session_id
     
-    # Use PUBLIC_URL for the proxy URL
     proxy_url = f"{PUBLIC_URL}/{session_id}/"
     
     return jsonify({
@@ -458,7 +448,6 @@ def create_session():
 def delete_session(session_id):
     if session_id in sessions:
         del sessions[session_id]
-        # Clean up user session mapping
         for user_id, sid in list(user_sessions.items()):
             if sid == session_id:
                 del user_sessions[user_id]
@@ -504,8 +493,6 @@ class FFBot:
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.effective_user.id)
-        
-        # Check if user has active session
         has_session = user_id in user_sessions
         
         keyboard = [
@@ -577,7 +564,6 @@ class FFBot:
     async def process_credentials(self, update: Update, context: ContextTypes.DEFAULT_TYPE, uid, password):
         user_id = str(update.effective_user.id)
         
-        # Check if user already has an active session
         if user_id in user_sessions:
             await update.message.reply_text(
                 "❌ *You already have an active session!*\n\n"
@@ -591,7 +577,6 @@ class FFBot:
         
         send_unity_telemetry()
         
-        # Get token from API
         access_token, open_id, jwt_token, region = get_token_from_api(uid, password)
         
         if not access_token or not open_id:
@@ -601,7 +586,6 @@ class FFBot:
             )
             return
         
-        # Create session with user_id
         try:
             resp = requests.post(
                 f"http://127.0.0.1:{PROXY_PORT}/create_session",
@@ -645,7 +629,7 @@ class FFBot:
             f"✅ Proxy Headers Stripped\n"
             f"✅ Device Spoofing\n\n"
             f"⚠️ Keep this bot running!\n"
-            f"💡 Use /stop or click '🔄 Stop Session' to end this session.",
+            f"💡 Use /stop to end this session.",
             parse_mode='Markdown'
         )
     
@@ -662,8 +646,6 @@ class FFBot:
             await msg.reply_text("ℹ️ No active session found.")
             return
         
-        session_id = user_sessions[user_id]
-        
         try:
             resp = requests.post(
                 f"http://127.0.0.1:{PROXY_PORT}/stop_user_session",
@@ -673,7 +655,6 @@ class FFBot:
             if resp.status_code == 200:
                 await msg.reply_text("✅ Session stopped successfully!")
                 
-                # Update keyboard
                 keyboard = [
                     [InlineKeyboardButton("🎮 Login Game", callback_data="login_game")],
                     [InlineKeyboardButton("ℹ️ About", callback_data="about")]
@@ -742,25 +723,18 @@ class FFBot:
 
 # ==================== MAIN ====================
 def main():
-    if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
-        print("❌ Please set your BOT_TOKEN!")
-        print("Get your token from @BotFather on Telegram.")
-        return
-    
-    print("🎮 FF ULTRA PROXY BOT - RENDER READY")
+    print("🎮 FF ULTRA PROXY BOT - RAILWAY READY")
     print(f"🔌 Port: {PROXY_PORT}")
     print(f"📡 Public URL: {PUBLIC_URL}")
     print(f"🛡️ Proxy Headers: STRIPPED")
     print(f"📦 Method: localconfig.json")
     print(f"👤 Single Session Per User: ✅")
     
-    # Start proxy in background
     proxy_thread = threading.Thread(target=start_proxy, daemon=True)
     proxy_thread.start()
     time.sleep(2)
     print(f"✅ Proxy running on port {PROXY_PORT}")
     
-    # Start bot
     bot = FFBot(BOT_TOKEN)
     bot.run()
 
