@@ -1,6 +1,6 @@
 {
   "deploy": {
-    "startCommand": "python ff-bot.py",
+    "startCommand": "backend.py",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 100
   }
