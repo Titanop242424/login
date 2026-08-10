@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-🎮 FF ULTRA PROXY BOT - RAILWAY READY
+🎮 FF ULTRA PROXY BOT - RAILWAY READY (PYTHON 3.13 FIX)
 - Single session per user
 - Hardcoded configuration
 - localconfig.json method
@@ -17,9 +17,8 @@ import requests, urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ==================== HARDCODED CONFIG ====================
-# ⚠️ CHANGE THESE VALUES BEFORE DEPLOYING ⚠️
-BOT_TOKEN = "8700162861:AAEWqnAGTKB4Nofx133IS2qFHKmu6zfo0PM"  # Your bot token from @BotFather
-PUBLIC_URL = "https://ff-ultra-proxy.up.railway.app"  # Your Railway app URL (change after deploy)
+BOT_TOKEN = "8700162861:AAEWqnAGTKB4Nofx133IS2qFHKmu6zfo0PM"
+PUBLIC_URL = "https://ff-ultra-proxy.up.railway.app"
 API_URL = "http://metro.proxy.rlwy.net:18992/jwt"
 
 CLIENT_SECRET = "2ee44819e9b4598845141067b281621874d0d5d7af9d8f7e00c1e54715b7d1e3"
@@ -30,6 +29,7 @@ AES_IV = b'6oyZDr22E3ychjM%'
 # ==================== IMPORT PB2 FILES ====================
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'Pb2'))
 
+USE_PB2 = False
 try:
     from Pb2 import MajoRLoGinrEq_pb2
     from Pb2 import MajoRLoGinrEs_pb2
@@ -710,16 +710,29 @@ class FFBot:
             await self.about(update, context)
     
     def run(self):
-        self.application = Application.builder().token(self.token).build()
-        self.application.add_handler(CommandHandler("start", self.start))
-        self.application.add_handler(CommandHandler("login", self.login_game))
-        self.application.add_handler(CommandHandler("stop", self.stop_session))
-        self.application.add_handler(CommandHandler("cancel", self.cancel))
-        self.application.add_handler(CallbackQueryHandler(self.button_callback))
-        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
-        
-        print("🤖 Bot running...")
-        self.application.run_polling(allowed_updates=Update.ALL_TYPES)
+        try:
+            # Use ApplicationBuilder with timeout and connection pool settings
+            self.application = (
+                Application.builder()
+                .token(self.token)
+                .connect_timeout(30.0)
+                .read_timeout(30.0)
+                .build()
+            )
+            
+            self.application.add_handler(CommandHandler("start", self.start))
+            self.application.add_handler(CommandHandler("login", self.login_game))
+            self.application.add_handler(CommandHandler("stop", self.stop_session))
+            self.application.add_handler(CommandHandler("cancel", self.cancel))
+            self.application.add_handler(CallbackQueryHandler(self.button_callback))
+            self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
+            
+            print("🤖 Bot running...")
+            self.application.run_polling(allowed_updates=Update.ALL_TYPES)
+        except Exception as e:
+            print(f"❌ Bot error: {e}")
+            import traceback
+            traceback.print_exc()
 
 # ==================== MAIN ====================
 def main():
@@ -730,11 +743,13 @@ def main():
     print(f"📦 Method: localconfig.json")
     print(f"👤 Single Session Per User: ✅")
     
+    # Start proxy in background
     proxy_thread = threading.Thread(target=start_proxy, daemon=True)
     proxy_thread.start()
     time.sleep(2)
     print(f"✅ Proxy running on port {PROXY_PORT}")
     
+    # Start bot
     bot = FFBot(BOT_TOKEN)
     bot.run()
 
