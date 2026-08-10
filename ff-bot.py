@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-🎮 FF ULTRA PROXY BOT - RAILWAY READY (PYTHON 3.13 FIX)
+🎮 FF ULTRA PROXY BOT - RAILWAY (WEBHOOK MODE)
 - Single session per user
-- Hardcoded configuration
-- localconfig.json method
+- Webhook instead of polling
+- Compatible with Python 3.13
 """
 
 import os, sys, json, time, random, string, base64, hashlib, threading, re, logging, socket
@@ -26,6 +26,12 @@ PROXY_PORT = int(os.environ.get("PORT", 5031))
 AES_KEY = b'Yg&tc%DEuh6%Zc^8'
 AES_IV = b'6oyZDr22E3ychjM%'
 
+print(f"📡 Running on port: {PROXY_PORT}")
+print(f"📡 Public URL: {PUBLIC_URL}")
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # ==================== IMPORT PB2 FILES ====================
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'Pb2'))
 
@@ -39,12 +45,6 @@ try:
 except ImportError as e:
     print(f"⚠️ PB2 import error: {e}")
     USE_PB2 = False
-
-print(f"📡 Running on port: {PROXY_PORT}")
-print(f"📡 Public URL: {PUBLIC_URL}")
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # ==================== DEVICE POOL ====================
 DEVICE_POOL = [
@@ -286,8 +286,294 @@ def parse_major_login_response(data):
 app = Flask(__name__)
 sessions = {}
 user_sessions = {}
+application = None  # Will be initialized later
 
-# ==================== PROXY HANDLER ====================
+# ==================== WEBHOOK HANDLER ====================
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    """Handle incoming Telegram updates via webhook"""
+    try:
+        # Get the update data
+        json_data = request.get_json(force=True)
+        update = Update.de_json(json_data, application.bot)
+        
+        # Process the update
+        process_update(update)
+        
+        return jsonify({"status": "ok"}), 200
+    except Exception as e:
+        print(f"[Webhook] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"status": "error"}), 500
+
+# ==================== UPDATE PROCESSOR ====================
+async def process_update_async(update):
+    """Process update asynchronously"""
+    try:
+        # Handle callback queries
+        if update.callback_query:
+            await button_callback(update, None)
+            return
+        
+        # Handle messages
+        if update.message:
+            # Check for commands
+            if update.message.text and update.message.text.startswith('/'):
+                await handle_command(update, None)
+            else:
+                await handle_message(update, None)
+    except Exception as e:
+        print(f"[Process] Error: {e}")
+
+def process_update(update):
+    """Synchronous wrapper for processing updates"""
+    import asyncio
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(process_update_async(update))
+        loop.close()
+    except Exception as e:
+        print(f"[Process] Error: {e}")
+
+# ==================== BOT HANDLERS ====================
+user_data_storage = {}
+
+async def handle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    if text == '/start':
+        await start(update, context)
+    elif text == '/login':
+        await login_game(update, context)
+    elif text == '/stop':
+        await stop_session(update, context)
+    elif text == '/cancel':
+        await cancel(update, context)
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+    has_session = user_id in user_sessions
+    
+    keyboard = [
+        [InlineKeyboardButton("🎮 Login Game", callback_data="login_game")],
+        [InlineKeyboardButton("ℹ️ About", callback_data="about")]
+    ]
+    
+    if has_session:
+        keyboard.append([InlineKeyboardButton("🔄 Stop Session", callback_data="stop_session")])
+    
+    status_msg = "✅ Active session found!" if has_session else "❌ No active session"
+    
+    await update.message.reply_text(
+        f"🤖 *FF ULTRA PROXY BOT*\n\n"
+        f"📡 *Status:* {status_msg}\n"
+        f"🔌 *Port:* {PROXY_PORT}\n\n"
+        f"🛡️ *ALL PROXY HEADERS STRIPPED*\n"
+        f"📦 *localconfig.json method*\n\n"
+        f"Send your UID and Password to login!",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown'
+    )
+
+async def login_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.callback_query:
+        await update.callback_query.message.reply_text(
+            f"🔐 *Login with UID & Password*\n\n"
+            f"Send: `UID|PASSWORD`\n\n"
+            f"Example: `5934302410|JAY_nh3cr1xq`\n\n"
+            f"Or type /cancel to cancel.",
+            parse_mode='Markdown'
+        )
+        await update.callback_query.answer()
+    else:
+        await update.message.reply_text(
+            f"🔐 *Login with UID & Password*\n\n"
+            f"Send: `UID|PASSWORD`\n\n"
+            f"Example: `5934302410|JAY_nh3cr1xq`\n\n"
+            f"Or type /cancel to cancel.",
+            parse_mode='Markdown'
+        )
+    user_data_storage[str(update.effective_user.id)] = {'awaiting_credentials': True}
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+    
+    if user_data_storage.get(user_id, {}).get('awaiting_credentials'):
+        text = update.message.text
+        if text.lower() == '/cancel':
+            user_data_storage[user_id]['awaiting_credentials'] = False
+            await update.message.reply_text("❌ Cancelled.")
+            return
+        
+        if '|' in text:
+            parts = text.split('|')
+            uid = parts[0].strip()
+            password = parts[1].strip()
+            await process_credentials(update, context, uid, password)
+        else:
+            await update.message.reply_text(
+                "❌ Invalid format!\n\n"
+                "Send: `UID|PASSWORD`\n"
+                "Example: `5934302410|JAY_nh3cr1xq`",
+                parse_mode='Markdown'
+            )
+        user_data_storage[user_id]['awaiting_credentials'] = False
+        return
+    
+    await update.message.reply_text("Use /start")
+
+async def process_credentials(update: Update, context: ContextTypes.DEFAULT_TYPE, uid, password):
+    user_id = str(update.effective_user.id)
+    
+    if user_id in user_sessions:
+        await update.message.reply_text(
+            "❌ *You already have an active session!*\n\n"
+            "Please use the '🔄 Stop Session' button or /stop command to end it first.\n\n"
+            "Then you can create a new session.",
+            parse_mode='Markdown'
+        )
+        return
+    
+    await update.message.reply_text("🔄 Processing...")
+    
+    send_unity_telemetry()
+    
+    access_token, open_id, jwt_token, region = get_token_from_api(uid, password)
+    
+    if not access_token or not open_id:
+        await update.message.reply_text(
+            "❌ Failed to get token!\n\n"
+            "Check your UID and Password."
+        )
+        return
+    
+    try:
+        resp = requests.post(
+            f"http://127.0.0.1:{PROXY_PORT}/create_session",
+            json={
+                "access_token": access_token,
+                "open_id": open_id,
+                "region": region or "IND",
+                "uid": uid,
+                "user_id": user_id
+            },
+            timeout=5
+        )
+        data = resp.json()
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+        return
+    
+    if data.get('status') != 'success':
+        if data.get('status') == 'error':
+            await update.message.reply_text(f"❌ {data.get('message')}")
+        else:
+            await update.message.reply_text("❌ Failed to create session!")
+        return
+    
+    proxy_url = data['proxy_url']
+    session_id = data['session_id']
+    localconfig = {"serverUrl": proxy_url}
+    localconfig_json = json.dumps(localconfig, indent=2)
+    
+    await update.message.reply_text(
+        f"✅ *Session Created!*\n\n"
+        f"👤 *UID:* `{uid}`\n"
+        f"🆔 *Open ID:* `{open_id}`\n"
+        f"📡 *Proxy URL:* `{proxy_url}`\n"
+        f"🔑 *Session ID:* `{session_id}`\n\n"
+        f"📋 *localconfig.json:*\n```json\n{localconfig_json}\n```\n\n"
+        f"📁 *Path:* `/storage/emulated/0/Android/data/com.dts.freefiremax/files/`\n\n"
+        f"🛡️ *Anti-Ban Features:*\n"
+        f"✅ Unity Telemetry\n"
+        f"✅ PB2 Protocol\n"
+        f"✅ Proxy Headers Stripped\n"
+        f"✅ Device Spoofing\n\n"
+        f"⚠️ Keep this bot running!\n"
+        f"💡 Use /stop to end this session.",
+        parse_mode='Markdown'
+    )
+
+async def stop_session(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+    
+    if update.callback_query:
+        msg = update.callback_query.message
+        await update.callback_query.answer()
+    else:
+        msg = update.message
+    
+    if user_id not in user_sessions:
+        await msg.reply_text("ℹ️ No active session found.")
+        return
+    
+    try:
+        resp = requests.post(
+            f"http://127.0.0.1:{PROXY_PORT}/stop_user_session",
+            json={"user_id": user_id},
+            timeout=5
+        )
+        if resp.status_code == 200:
+            await msg.reply_text("✅ Session stopped successfully!")
+            
+            keyboard = [
+                [InlineKeyboardButton("🎮 Login Game", callback_data="login_game")],
+                [InlineKeyboardButton("ℹ️ About", callback_data="about")]
+            ]
+            await msg.reply_text(
+                "You can now create a new session.",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        else:
+            await msg.reply_text("❌ Failed to stop session!")
+    except Exception as e:
+        await msg.reply_text(f"❌ Error: {e}")
+
+async def about(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.callback_query:
+        msg = update.callback_query.message
+        await update.callback_query.answer()
+    else:
+        msg = update.message
+    
+    await msg.reply_text(
+        "🤖 *FF ULTRA PROXY BOT*\n\n"
+        "⚡ HTTP Proxy with localconfig.json\n"
+        "🛡️ All Proxy Headers Stripped\n"
+        "✅ Unity Telemetry\n"
+        "✅ PB2 Protocol\n"
+        "✅ Device Spoofing\n"
+        "✅ Single Session Per User\n\n"
+        "📢 @FREEFlRECODE\n"
+        "👨‍💻 @FounderOfKrishna",
+        parse_mode='Markdown'
+    )
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+    if user_id in user_data_storage:
+        user_data_storage[user_id]['awaiting_credentials'] = False
+    await update.message.reply_text("❌ Cancelled.")
+
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "login_game":
+        await query.message.reply_text(
+            f"🔐 *Login with UID & Password*\n\n"
+            f"Send: `UID|PASSWORD`\n\n"
+            f"Example: `5934302410|JAY_nh3cr1xq`",
+            parse_mode='Markdown'
+        )
+        user_data_storage[str(update.effective_user.id)] = {'awaiting_credentials': True}
+    elif query.data == "stop_session":
+        await stop_session(update, context)
+    elif query.data == "about":
+        await about(update, context)
+
+# ==================== FLASK PROXY ROUTES ====================
 @app.route('/', methods=['GET', 'POST', 'PUT', 'DELETE'])
 @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
 def proxy_handler(path=""):
@@ -485,263 +771,39 @@ def stop_user_session():
 def start_proxy():
     app.run(host='0.0.0.0', port=PROXY_PORT, debug=False, use_reloader=False, threaded=True)
 
-# ==================== TELEGRAM BOT ====================
-class FFBot:
-    def __init__(self, token):
-        self.token = token
-        self.application = None
+# ==================== SET WEBHOOK ====================
+def set_webhook():
+    """Set webhook for the bot"""
+    webhook_url = f"{PUBLIC_URL}/webhook"
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook"
+    params = {"url": webhook_url}
     
-    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = str(update.effective_user.id)
-        has_session = user_id in user_sessions
-        
-        keyboard = [
-            [InlineKeyboardButton("🎮 Login Game", callback_data="login_game")],
-            [InlineKeyboardButton("ℹ️ About", callback_data="about")]
-        ]
-        
-        if has_session:
-            keyboard.append([InlineKeyboardButton("🔄 Stop Session", callback_data="stop_session")])
-        
-        status_msg = "✅ Active session found!" if has_session else "❌ No active session"
-        
-        await update.message.reply_text(
-            f"🤖 *FF ULTRA PROXY BOT*\n\n"
-            f"📡 *Status:* {status_msg}\n"
-            f"🔌 *Port:* {PROXY_PORT}\n\n"
-            f"🛡️ *ALL PROXY HEADERS STRIPPED*\n"
-            f"📦 *localconfig.json method*\n\n"
-            f"Send your UID and Password to login!",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='Markdown'
-        )
-    
-    async def login_game(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if update.callback_query:
-            await update.callback_query.message.reply_text(
-                f"🔐 *Login with UID & Password*\n\n"
-                f"Send: `UID|PASSWORD`\n\n"
-                f"Example: `5934302410|JAY_nh3cr1xq`\n\n"
-                f"Or type /cancel to cancel.",
-                parse_mode='Markdown'
-            )
-            await update.callback_query.answer()
+    try:
+        resp = requests.get(url, params=params, timeout=10)
+        data = resp.json()
+        if data.get('ok'):
+            print(f"✅ Webhook set to {webhook_url}")
+            return True
         else:
-            await update.message.reply_text(
-                f"🔐 *Login with UID & Password*\n\n"
-                f"Send: `UID|PASSWORD`\n\n"
-                f"Example: `5934302410|JAY_nh3cr1xq`\n\n"
-                f"Or type /cancel to cancel.",
-                parse_mode='Markdown'
-            )
-        context.user_data['awaiting_credentials'] = True
-    
-    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if context.user_data.get('awaiting_credentials'):
-            text = update.message.text
-            if text.lower() == '/cancel':
-                context.user_data['awaiting_credentials'] = False
-                await update.message.reply_text("❌ Cancelled.")
-                return
-            
-            if '|' in text:
-                parts = text.split('|')
-                uid = parts[0].strip()
-                password = parts[1].strip()
-                await self.process_credentials(update, context, uid, password)
-            else:
-                await update.message.reply_text(
-                    "❌ Invalid format!\n\n"
-                    "Send: `UID|PASSWORD`\n"
-                    "Example: `5934302410|JAY_nh3cr1xq`",
-                    parse_mode='Markdown'
-                )
-            
-            context.user_data['awaiting_credentials'] = False
-            return
-        await update.message.reply_text("Use /start")
-    
-    async def process_credentials(self, update: Update, context: ContextTypes.DEFAULT_TYPE, uid, password):
-        user_id = str(update.effective_user.id)
-        
-        if user_id in user_sessions:
-            await update.message.reply_text(
-                "❌ *You already have an active session!*\n\n"
-                "Please use the '🔄 Stop Session' button or /stop command to end it first.\n\n"
-                "Then you can create a new session.",
-                parse_mode='Markdown'
-            )
-            return
-        
-        await update.message.reply_text("🔄 Processing...")
-        
-        send_unity_telemetry()
-        
-        access_token, open_id, jwt_token, region = get_token_from_api(uid, password)
-        
-        if not access_token or not open_id:
-            await update.message.reply_text(
-                "❌ Failed to get token!\n\n"
-                "Check your UID and Password."
-            )
-            return
-        
-        try:
-            resp = requests.post(
-                f"http://127.0.0.1:{PROXY_PORT}/create_session",
-                json={
-                    "access_token": access_token,
-                    "open_id": open_id,
-                    "region": region or "IND",
-                    "uid": uid,
-                    "user_id": user_id
-                },
-                timeout=5
-            )
-            data = resp.json()
-        except Exception as e:
-            await update.message.reply_text(f"❌ Error: {e}")
-            return
-        
-        if data.get('status') != 'success':
-            if data.get('status') == 'error':
-                await update.message.reply_text(f"❌ {data.get('message')}")
-            else:
-                await update.message.reply_text("❌ Failed to create session!")
-            return
-        
-        proxy_url = data['proxy_url']
-        session_id = data['session_id']
-        localconfig = {"serverUrl": proxy_url}
-        localconfig_json = json.dumps(localconfig, indent=2)
-        
-        await update.message.reply_text(
-            f"✅ *Session Created!*\n\n"
-            f"👤 *UID:* `{uid}`\n"
-            f"🆔 *Open ID:* `{open_id}`\n"
-            f"📡 *Proxy URL:* `{proxy_url}`\n"
-            f"🔑 *Session ID:* `{session_id}`\n\n"
-            f"📋 *localconfig.json:*\n```json\n{localconfig_json}\n```\n\n"
-            f"📁 *Path:* `/storage/emulated/0/Android/data/com.dts.freefiremax/files/`\n\n"
-            f"🛡️ *Anti-Ban Features:*\n"
-            f"✅ Unity Telemetry\n"
-            f"✅ PB2 Protocol\n"
-            f"✅ Proxy Headers Stripped\n"
-            f"✅ Device Spoofing\n\n"
-            f"⚠️ Keep this bot running!\n"
-            f"💡 Use /stop to end this session.",
-            parse_mode='Markdown'
-        )
-    
-    async def stop_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = str(update.effective_user.id)
-        
-        if update.callback_query:
-            msg = update.callback_query.message
-            await update.callback_query.answer()
-        else:
-            msg = update.message
-        
-        if user_id not in user_sessions:
-            await msg.reply_text("ℹ️ No active session found.")
-            return
-        
-        try:
-            resp = requests.post(
-                f"http://127.0.0.1:{PROXY_PORT}/stop_user_session",
-                json={"user_id": user_id},
-                timeout=5
-            )
-            if resp.status_code == 200:
-                await msg.reply_text("✅ Session stopped successfully!")
-                
-                keyboard = [
-                    [InlineKeyboardButton("🎮 Login Game", callback_data="login_game")],
-                    [InlineKeyboardButton("ℹ️ About", callback_data="about")]
-                ]
-                await msg.reply_text(
-                    "You can now create a new session.",
-                    reply_markup=InlineKeyboardMarkup(keyboard)
-                )
-            else:
-                await msg.reply_text("❌ Failed to stop session!")
-        except Exception as e:
-            await msg.reply_text(f"❌ Error: {e}")
-    
-    async def about(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if update.callback_query:
-            msg = update.callback_query.message
-            await update.callback_query.answer()
-        else:
-            msg = update.message
-        
-        await msg.reply_text(
-            "🤖 *FF ULTRA PROXY BOT*\n\n"
-            "⚡ HTTP Proxy with localconfig.json\n"
-            "🛡️ All Proxy Headers Stripped\n"
-            "✅ Unity Telemetry\n"
-            "✅ PB2 Protocol\n"
-            "✅ Device Spoofing\n"
-            "✅ Single Session Per User\n\n"
-            "📢 @FREEFlRECODE\n"
-            "👨‍💻 @FounderOfKrishna",
-            parse_mode='Markdown'
-        )
-    
-    async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        context.user_data['awaiting_credentials'] = False
-        await update.message.reply_text("❌ Cancelled.")
-    
-    async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        query = update.callback_query
-        await query.answer()
-        
-        if query.data == "login_game":
-            await query.message.reply_text(
-                f"🔐 *Login with UID & Password*\n\n"
-                f"Send: `UID|PASSWORD`\n\n"
-                f"Example: `5934302410|JAY_nh3cr1xq`",
-                parse_mode='Markdown'
-            )
-            context.user_data['awaiting_credentials'] = True
-        elif query.data == "stop_session":
-            await self.stop_session(update, context)
-        elif query.data == "about":
-            await self.about(update, context)
-    
-    def run(self):
-        try:
-            # Use ApplicationBuilder with timeout and connection pool settings
-            self.application = (
-                Application.builder()
-                .token(self.token)
-                .connect_timeout(30.0)
-                .read_timeout(30.0)
-                .build()
-            )
-            
-            self.application.add_handler(CommandHandler("start", self.start))
-            self.application.add_handler(CommandHandler("login", self.login_game))
-            self.application.add_handler(CommandHandler("stop", self.stop_session))
-            self.application.add_handler(CommandHandler("cancel", self.cancel))
-            self.application.add_handler(CallbackQueryHandler(self.button_callback))
-            self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
-            
-            print("🤖 Bot running...")
-            self.application.run_polling(allowed_updates=Update.ALL_TYPES)
-        except Exception as e:
-            print(f"❌ Bot error: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"❌ Webhook failed: {data}")
+            return False
+    except Exception as e:
+        print(f"❌ Webhook error: {e}")
+        return False
 
 # ==================== MAIN ====================
 def main():
-    print("🎮 FF ULTRA PROXY BOT - RAILWAY READY")
+    global application
+    
+    print("🎮 FF ULTRA PROXY BOT - RAILWAY (WEBHOOK MODE)")
     print(f"🔌 Port: {PROXY_PORT}")
     print(f"📡 Public URL: {PUBLIC_URL}")
     print(f"🛡️ Proxy Headers: STRIPPED")
     print(f"📦 Method: localconfig.json")
     print(f"👤 Single Session Per User: ✅")
+    
+    # Initialize application for webhook
+    application = Application.builder().token(BOT_TOKEN).build()
     
     # Start proxy in background
     proxy_thread = threading.Thread(target=start_proxy, daemon=True)
@@ -749,9 +811,19 @@ def main():
     time.sleep(2)
     print(f"✅ Proxy running on port {PROXY_PORT}")
     
-    # Start bot
-    bot = FFBot(BOT_TOKEN)
-    bot.run()
+    # Set webhook
+    time.sleep(1)
+    set_webhook()
+    
+    print("🤖 Bot is running with webhook!")
+    
+    # Keep the server running
+    try:
+        while True:
+            time.sleep(60)
+    except KeyboardInterrupt:
+        print("\n👋 Stopped")
+        sys.exit(0)
 
 if __name__ == '__main__':
     try:
