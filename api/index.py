@@ -14,7 +14,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ==================== HARDCODED CONFIG ====================
 BOT_TOKEN = "8700162861:AAEWqnAGTKB4Nofx133IS2qFHKmu6zfo0PM"
-PUBLIC_URL = "https://YOUR-APP-NAME.vercel.app"  # CHANGE THIS AFTER DEPLOY!
+PUBLIC_URL = "https://login-five-silk.vercel.app"  # CHANGE THIS AFTER DEPLOY!
 API_URL = "http://metro.proxy.rlwy.net:18992/jwt"
 
 CLIENT_SECRET = "2ee44819e9b4598845141067b281621874d0d5d7af9d8f7e00c1e54715b7d1e3"
