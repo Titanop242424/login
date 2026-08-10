@@ -1,33 +1,27 @@
 #!/usr/bin/env python3
 """
-🎮 FF ULTRA PROXY BOT - RENDER READY
-- Single session per user
-- Hardcoded configuration
-- localconfig.json method
+🎮 FF PROXY BACKEND - RAILWAY READY
+- Handles all proxy traffic
+- Session management
+- Header stripping
+- Always on
 """
 
-import os, sys, json, time, random, string, base64, hashlib, threading, re, logging, socket
+import os, sys, json, time, random, base64, hashlib, threading, re, logging
 from datetime import datetime
 from flask import Flask, request, Response, jsonify
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
 import requests, urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# ==================== HARDCODED CONFIG ====================
-BOT_TOKEN = "8700162861:AAEWqnAGTKB4Nofx133IS2qFHKmu6zfo0PM"
-PUBLIC_URL = "https://YOUR-APP-NAME.onrender.com"  # CHANGE THIS AFTER DEPLOY!
-API_URL = "http://metro.proxy.rlwy.net:18992/jwt"
-
+# ==================== CONFIG ====================
 CLIENT_SECRET = "2ee44819e9b4598845141067b281621874d0d5d7af9d8f7e00c1e54715b7d1e3"
-PROXY_PORT = int(os.environ.get("PORT", 5031))
 AES_KEY = b'Yg&tc%DEuh6%Zc^8'
 AES_IV = b'6oyZDr22E3ychjM%'
+PROXY_PORT = int(os.environ.get("PORT", 5031))
 
-# ==================== Crypto Imports ====================
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad, unpad
-
-print(f"📡 Running on port: {PROXY_PORT}")
-print(f"📡 Public URL: {PUBLIC_URL}")
+print(f"📡 Backend running on port: {PROXY_PORT}")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -45,35 +39,6 @@ try:
 except ImportError as e:
     print(f"⚠️ PB2 import error: {e}")
     USE_PB2 = False
-
-# ==================== TELEGRAM API HELPER ====================
-def tg_send_message(chat_id, text, reply_markup=None, parse_mode='Markdown'):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": parse_mode,
-        "disable_web_page_preview": True
-    }
-    if reply_markup:
-        payload["reply_markup"] = reply_markup
-    
-    try:
-        resp = requests.post(url, json=payload, timeout=10)
-        return resp.json()
-    except Exception as e:
-        print(f"[TG] Send error: {e}")
-        return None
-
-def tg_answer_callback(callback_id, text=None):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery"
-    payload = {"callback_query_id": callback_id}
-    if text:
-        payload["text"] = text
-    try:
-        requests.post(url, json=payload, timeout=5)
-    except:
-        pass
 
 # ==================== DEVICE POOL ====================
 DEVICE_POOL = [
@@ -102,74 +67,6 @@ def strip_proxy_headers(headers):
     
     headers.pop('Server', None)
     return headers
-
-# ==================== UNITY TELEMETRY ====================
-def send_unity_telemetry():
-    try:
-        session_id = random.randint(1000000000000000000, 9999999999999999999)
-        user_id = hashlib.md5(str(random.randint(1000000, 9999999)).encode()).hexdigest()
-        app_id = f"local.{hashlib.md5(str(random.randint(1000000, 9999999)).encode()).hexdigest()}"
-        
-        url = "https://config.uca.cloud.unity3d.com/"
-        payload = {
-            "common": {
-                "appid": app_id,
-                "userid": user_id,
-                "sessionid": session_id,
-                "platform": "AndroidPlayer",
-                "platformid": 11,
-                "sdk_ver": "u2022.3.47f1",
-                "runMode": "human-hub",
-                "sdk_rev": "0"
-            }
-        }
-        headers = {
-            "User-Agent": "UnityPlayer/2022.3.47f1 (UnityWebRequest/1.0, libcurl/8.5.0-DEV)",
-            "X-Unity-Version": "2022.3.47f1",
-            "Content-Type": "application/json",
-            "Accept": "*/*",
-            "Accept-Encoding": "deflate, gzip",
-            "Unity-Request-Type": "config"
-        }
-        requests.post(url, json=payload, headers=headers, timeout=10, verify=False)
-    except:
-        pass
-    
-    try:
-        device = get_random_device()
-        url = f"https://version.ggwhitehawk.com/live/ver.php?version=1.129.15&lang=en&device=android&channel=android&appstore=googleplay&region=DEFAULT&release_version=OB54&whitelist_version=1.7.0&whitelist_sp_version=1.0.0&device_name={device['model']}&device_CPU=ARM64&device_GPU=Adreno&device_mem=3914"
-        headers = {
-            "User-Agent": "UnityPlayer/2022.3.47f1 (UnityWebRequest/1.0, libcurl/8.5.0-DEV)",
-            "X-Unity-Version": "2022.3.47f1",
-            "Accept": "*/*",
-            "Accept-Encoding": "deflate, gzip"
-        }
-        requests.get(url, headers=headers, timeout=10, verify=False)
-    except:
-        pass
-
-# ==================== API CALL ====================
-def get_token_from_api(uid, password, region="IND"):
-    try:
-        url = f"{API_URL}?uid={uid}&password={password}&region={region}"
-        print(f"[Bot] Calling API: {url}")
-        
-        resp = requests.get(url, verify=False, timeout=30)
-        
-        if resp.status_code == 200:
-            data = resp.json()
-            access_token = data.get('access_token')
-            open_id = data.get('open_id')
-            jwt_token = data.get('jwt_token')
-            
-            if access_token and open_id:
-                print(f"[Bot] ✅ Got token: {access_token[:20]}...")
-                print(f"[Bot] ✅ Got open_id: {open_id}")
-                return access_token, open_id, jwt_token, data.get('region', region)
-        return None, None, None, None
-    except Exception as e:
-        print(f"[Bot] ❌ API Exception: {e}")
-        return None, None, None, None
 
 # ==================== ENCRYPTION ====================
 def encrypt_proto(data):
@@ -315,51 +212,11 @@ def parse_major_login_response(data):
 app = Flask(__name__)
 sessions = {}
 user_sessions = {}
-user_data = {}
 
-# ==================== WEBHOOK ROUTE ====================
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    """Handle incoming Telegram updates"""
-    try:
-        data = request.get_json(force=True)
-        print(f"[Webhook] Received update: {data.get('update_id', 'unknown')}")
-        
-        # Process the update
-        threading.Thread(target=process_update, args=(data,), daemon=True).start()
-        
-        return jsonify({"status": "ok"}), 200
-    except Exception as e:
-        print(f"[Webhook] Error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 200
-
-# ==================== ROOT ROUTE ====================
-@app.route('/', methods=['GET'])
-def root():
-    return jsonify({
-        "status": "online",
-        "bot": "FF ULTRA PROXY BOT",
-        "public_url": PUBLIC_URL,
-        "webhook_url": f"{PUBLIC_URL}/webhook"
-    })
-
-# ==================== HEALTH ROUTE ====================
-@app.route('/health', methods=['GET'])
-def health():
-    return jsonify({
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "active_sessions": len(sessions),
-        "active_users": len(user_sessions)
-    })
-
-# ==================== PROXY ROUTES ====================
+# ==================== PROXY HANDLER ====================
+@app.route('/', methods=['GET', 'POST', 'PUT', 'DELETE'])
 @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
-def proxy_handler(path):
-    # Skip reserved paths
-    if path in ['webhook', 'health', 'create_session', 'delete_session', 'stop_user_session', 'ip']:
-        return jsonify({"error": "Reserved path"}), 404
-    
+def proxy_handler(path=""):
     parts = path.split('/')
     session_id = parts[0] if parts and parts[0] in sessions else None
     if not session_id:
@@ -488,8 +345,6 @@ def create_session():
             "message": "You already have an active session! Please use /stop to end it first."
         }), 409
     
-    send_unity_telemetry()
-    
     session_id = base64.b64encode(access_token[:16].encode()).decode()[:8]
     sessions[session_id] = {
         'access_token': access_token,
@@ -503,15 +358,17 @@ def create_session():
     if user_id:
         user_sessions[user_id] = session_id
     
-    proxy_url = f"{PUBLIC_URL}/{session_id}/"
-    
     return jsonify({
         "status": "success",
         "session_id": session_id,
-        "proxy_url": proxy_url,
-        "localconfig": {"serverUrl": proxy_url},
         "open_id": open_id
     })
+
+@app.route('/get_session/<session_id>', methods=['GET'])
+def get_session(session_id):
+    if session_id in sessions:
+        return jsonify(sessions[session_id])
+    return jsonify({"error": "Session not found"}), 404
 
 @app.route('/delete_session/<session_id>', methods=['DELETE'])
 def delete_session(session_id):
@@ -523,10 +380,6 @@ def delete_session(session_id):
                 break
         return jsonify({"status": "deleted"})
     return jsonify({"error": "Session not found"}), 404
-
-@app.route('/ip', methods=['GET'])
-def get_ip():
-    return jsonify({"local_ip": "0.0.0.0", "port": PROXY_PORT})
 
 @app.route('/stop_user_session', methods=['POST'])
 def stop_user_session():
@@ -542,277 +395,30 @@ def stop_user_session():
     
     return jsonify({"error": "No active session found"}), 404
 
-# ==================== PROCESS UPDATE ====================
-def process_update(data):
-    """Process Telegram update"""
-    try:
-        if 'callback_query' in data:
-            handle_callback(data['callback_query'])
-            return
-        
-        if 'message' in data:
-            handle_message(data['message'])
-    except Exception as e:
-        print(f"[Process] Error: {e}")
-        import traceback
-        traceback.print_exc()
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "active_sessions": len(sessions),
+        "active_users": len(user_sessions)
+    })
 
-# ==================== BOT HANDLERS ====================
-def handle_message(message):
-    chat_id = message['chat']['id']
-    text = message.get('text', '')
-    user_id = str(message['from']['id'])
-    
-    if user_data.get(user_id, {}).get('awaiting_credentials'):
-        if text.lower() == '/cancel':
-            user_data[user_id]['awaiting_credentials'] = False
-            tg_send_message(chat_id, "❌ Cancelled.")
-            return
-        
-        if '|' in text:
-            parts = text.split('|')
-            uid = parts[0].strip()
-            password = parts[1].strip()
-            process_credentials(chat_id, user_id, uid, password)
-        else:
-            tg_send_message(
-                chat_id,
-                "❌ Invalid format!\n\nSend: `UID|PASSWORD`\nExample: `5934302410|JAY_nh3cr1xq`",
-                parse_mode='Markdown'
-            )
-        user_data[user_id]['awaiting_credentials'] = False
-        return
-    
-    if text == '/start':
-        send_start(chat_id, user_id)
-    elif text == '/login':
-        send_login_prompt(chat_id, user_id)
-    elif text == '/stop':
-        stop_session(chat_id, user_id)
-    elif text == '/help':
-        send_help(chat_id)
-    else:
-        tg_send_message(chat_id, "Use /start to begin.")
-
-def send_start(chat_id, user_id):
-    has_session = user_id in user_sessions
-    
-    keyboard = {
-        "inline_keyboard": [
-            [{"text": "🎮 Login Game", "callback_data": "login_game"}],
-            [{"text": "ℹ️ About", "callback_data": "about"}]
-        ]
-    }
-    
-    if has_session:
-        keyboard["inline_keyboard"].append([{"text": "🔄 Stop Session", "callback_data": "stop_session"}])
-    
-    status_msg = "✅ Active session found!" if has_session else "❌ No active session"
-    
-    tg_send_message(
-        chat_id,
-        f"🤖 *FF ULTRA PROXY BOT*\n\n"
-        f"📡 *Status:* {status_msg}\n"
-        f"🔌 *Port:* {PROXY_PORT}\n\n"
-        f"🛡️ *ALL PROXY HEADERS STRIPPED*\n"
-        f"📦 *localconfig.json method*\n\n"
-        f"Send your UID and Password to login!",
-        reply_markup=json.dumps(keyboard),
-        parse_mode='Markdown'
-    )
-
-def send_login_prompt(chat_id, user_id):
-    user_data[user_id] = {'awaiting_credentials': True}
-    tg_send_message(
-        chat_id,
-        f"🔐 *Login with UID & Password*\n\n"
-        f"Send: `UID|PASSWORD`\n\n"
-        f"Example: `5934302410|JAY_nh3cr1xq`\n\n"
-        f"Or type /cancel to cancel.",
-        parse_mode='Markdown'
-    )
-
-def process_credentials(chat_id, user_id, uid, password):
-    if user_id in user_sessions:
-        tg_send_message(
-            chat_id,
-            "❌ *You already have an active session!*\n\n"
-            "Please use /stop to end it first.",
-            parse_mode='Markdown'
-        )
-        return
-    
-    tg_send_message(chat_id, "🔄 Processing...")
-    
-    send_unity_telemetry()
-    
-    access_token, open_id, jwt_token, region = get_token_from_api(uid, password)
-    
-    if not access_token or not open_id:
-        tg_send_message(
-            chat_id,
-            "❌ Failed to get token!\n\nCheck your UID and Password."
-        )
-        return
-    
-    try:
-        resp = requests.post(
-            f"http://127.0.0.1:{PROXY_PORT}/create_session",
-            json={
-                "access_token": access_token,
-                "open_id": open_id,
-                "region": region or "IND",
-                "uid": uid,
-                "user_id": user_id
-            },
-            timeout=5
-        )
-        data = resp.json()
-    except Exception as e:
-        tg_send_message(chat_id, f"❌ Error: {e}")
-        return
-    
-    if data.get('status') != 'success':
-        if data.get('status') == 'error':
-            tg_send_message(chat_id, f"❌ {data.get('message')}")
-        else:
-            tg_send_message(chat_id, "❌ Failed to create session!")
-        return
-    
-    proxy_url = data['proxy_url']
-    session_id = data['session_id']
-    localconfig = {"serverUrl": proxy_url}
-    localconfig_json = json.dumps(localconfig, indent=2)
-    
-    tg_send_message(
-        chat_id,
-        f"✅ *Session Created!*\n\n"
-        f"👤 *UID:* `{uid}`\n"
-        f"🆔 *Open ID:* `{open_id}`\n"
-        f"📡 *Proxy URL:* `{proxy_url}`\n"
-        f"🔑 *Session ID:* `{session_id}`\n\n"
-        f"📋 *localconfig.json:*\n```json\n{localconfig_json}\n```\n\n"
-        f"📁 *Path:* `/storage/emulated/0/Android/data/com.dts.freefiremax/files/`\n\n"
-        f"🛡️ *Anti-Ban Features:*\n"
-        f"✅ Unity Telemetry\n"
-        f"✅ PB2 Protocol\n"
-        f"✅ Proxy Headers Stripped\n"
-        f"✅ Device Spoofing\n\n"
-        f"⚠️ Keep this bot running!\n"
-        f"💡 Use /stop to end this session.",
-        parse_mode='Markdown'
-    )
-
-def stop_session(chat_id, user_id):
-    if user_id not in user_sessions:
-        tg_send_message(chat_id, "ℹ️ No active session found.")
-        return
-    
-    try:
-        resp = requests.post(
-            f"http://127.0.0.1:{PROXY_PORT}/stop_user_session",
-            json={"user_id": user_id},
-            timeout=5
-        )
-        if resp.status_code == 200:
-            tg_send_message(chat_id, "✅ Session stopped successfully!")
-            
-            keyboard = {
-                "inline_keyboard": [
-                    [{"text": "🎮 Login Game", "callback_data": "login_game"}],
-                    [{"text": "ℹ️ About", "callback_data": "about"}]
-                ]
-            }
-            tg_send_message(
-                chat_id,
-                "You can now create a new session.",
-                reply_markup=json.dumps(keyboard)
-            )
-        else:
-            tg_send_message(chat_id, "❌ Failed to stop session!")
-    except Exception as e:
-        tg_send_message(chat_id, f"❌ Error: {e}")
-
-def send_help(chat_id):
-    tg_send_message(
-        chat_id,
-        "🤖 *FF ULTRA PROXY BOT*\n\n"
-        "📌 *Commands:*\n"
-        "/start - Start the bot\n"
-        "/login - Login with UID & Password\n"
-        "/stop - Stop current session\n"
-        "/help - Show this help\n\n"
-        "📌 *How to use:*\n"
-        "1. Use /login\n"
-        "2. Send your UID and Password\n"
-        "3. Copy the proxy URL\n"
-        "4. Create localconfig.json in game directory\n"
-        "5. Login to the game!",
-        parse_mode='Markdown'
-    )
-
-def handle_callback(callback):
-    callback_id = callback['id']
-    chat_id = callback['message']['chat']['id']
-    user_id = str(callback['from']['id'])
-    data = callback.get('data', '')
-    
-    tg_answer_callback(callback_id)
-    
-    if data == "login_game":
-        send_login_prompt(chat_id, user_id)
-    elif data == "stop_session":
-        stop_session(chat_id, user_id)
-    elif data == "about":
-        tg_send_message(
-            chat_id,
-            "🤖 *FF ULTRA PROXY BOT*\n\n"
-            "⚡ HTTP Proxy with localconfig.json\n"
-            "🛡️ All Proxy Headers Stripped\n"
-            "✅ Unity Telemetry\n"
-            "✅ PB2 Protocol\n"
-            "✅ Device Spoofing\n"
-            "✅ Single Session Per User\n\n"
-            "📢 @FREEFlRECODE\n"
-            "👨‍💻 @FounderOfKrishna",
-            parse_mode='Markdown'
-        )
-
-# ==================== SET WEBHOOK ====================
-def set_webhook():
-    webhook_url = f"{PUBLIC_URL}/webhook"
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook"
-    params = {"url": webhook_url}
-    
-    try:
-        resp = requests.get(url, params=params, timeout=10)
-        data = resp.json()
-        if data.get('ok'):
-            print(f"✅ Webhook set to {webhook_url}")
-            return True
-        else:
-            print(f"❌ Webhook failed: {data}")
-            return False
-    except Exception as e:
-        print(f"❌ Webhook error: {e}")
-        return False
+@app.route('/stats', methods=['GET'])
+def stats():
+    return jsonify({
+        "total_sessions": len(sessions),
+        "total_users": len(user_sessions),
+        "sessions": list(sessions.keys())[:10]
+    })
 
 # ==================== MAIN ====================
 def main():
-    print("🎮 FF ULTRA PROXY BOT - RENDER READY")
+    print("🎮 FF PROXY BACKEND - RAILWAY READY")
     print(f"🔌 Port: {PROXY_PORT}")
-    print(f"📡 Public URL: {PUBLIC_URL}")
     print(f"🛡️ Proxy Headers: STRIPPED")
-    print(f"📦 Method: localconfig.json")
-    print(f"👤 Single Session Per User: ✅")
+    print(f"📦 PB2: {'✅' if USE_PB2 else '⚠️'}")
     
-    # Set webhook
-    time.sleep(2)
-    set_webhook()
-    
-    print("🤖 Bot is running with webhook!")
-    
-    # Start Flask app
     app.run(host='0.0.0.0', port=PROXY_PORT, debug=False, threaded=True)
 
 if __name__ == '__main__':
