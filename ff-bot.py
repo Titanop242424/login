@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
-🎮 FF ULTRA PROXY BOT - RAW API (NO PYTHON-TELEGRAM-BOT)
-- No Updater/Application classes
-- Raw Telegram API calls
-- Compatible with Python 3.13
+🎮 FF ULTRA PROXY BOT - RAW API (FIXED WEBHOOK)
+- Fixed 404 error
+- All routes working
 """
 
 import os, sys, json, time, random, string, base64, hashlib, threading, re, logging, socket
@@ -46,7 +45,6 @@ except ImportError as e:
 
 # ==================== TELEGRAM API HELPER ====================
 def tg_send_message(chat_id, text, reply_markup=None, parse_mode='Markdown'):
-    """Send message via Telegram API"""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
@@ -64,21 +62,7 @@ def tg_send_message(chat_id, text, reply_markup=None, parse_mode='Markdown'):
         print(f"[TG] Send error: {e}")
         return None
 
-def tg_send_photo(chat_id, photo_url, caption=None):
-    """Send photo via Telegram API"""
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
-    payload = {"chat_id": chat_id, "photo": photo_url}
-    if caption:
-        payload["caption"] = caption
-    try:
-        resp = requests.post(url, json=payload, timeout=10)
-        return resp.json()
-    except Exception as e:
-        print(f"[TG] Photo error: {e}")
-        return None
-
 def tg_answer_callback(callback_id, text=None):
-    """Answer callback query"""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery"
     payload = {"callback_query_id": callback_id}
     if text:
@@ -330,10 +314,52 @@ sessions = {}
 user_sessions = {}
 user_data = {}
 
-# ==================== PROXY HANDLER ====================
-@app.route('/', methods=['GET', 'POST', 'PUT', 'DELETE'])
+# ==================== ROOT ROUTE ====================
+@app.route('/', methods=['GET', 'POST'])
+def root():
+    return jsonify({
+        "status": "online",
+        "bot": "FF ULTRA PROXY BOT",
+        "public_url": PUBLIC_URL,
+        "webhook_url": f"{PUBLIC_URL}/webhook"
+    })
+
+# ==================== WEBHOOK ROUTE ====================
+@app.route('/webhook', methods=['POST', 'GET'])
+def webhook():
+    """Handle incoming Telegram updates"""
+    if request.method == 'GET':
+        return jsonify({"status": "webhook endpoint", "method": "GET"}), 200
+    
+    try:
+        data = request.get_json(force=True)
+        print(f"[Webhook] Received update: {data.get('update_id', 'unknown')}")
+        
+        # Process the update
+        threading.Thread(target=process_update, args=(data,), daemon=True).start()
+        
+        return jsonify({"status": "ok"}), 200
+    except Exception as e:
+        print(f"[Webhook] Error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 200
+
+# ==================== HEALTH ROUTE ====================
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "active_sessions": len(sessions),
+        "active_users": len(user_sessions)
+    })
+
+# ==================== PROXY ROUTES ====================
 @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
-def proxy_handler(path=""):
+def proxy_handler(path):
+    # Skip reserved paths
+    if path in ['webhook', 'health', 'create_session', 'delete_session', 'stop_user_session', 'ip']:
+        return jsonify({"error": "Reserved path"}), 404
+    
     parts = path.split('/')
     session_id = parts[0] if parts and parts[0] in sessions else None
     if not session_id:
@@ -502,15 +528,6 @@ def delete_session(session_id):
 def get_ip():
     return jsonify({"local_ip": "0.0.0.0", "port": PROXY_PORT})
 
-@app.route('/health', methods=['GET'])
-def health():
-    return jsonify({
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "active_sessions": len(sessions),
-        "active_users": len(user_sessions)
-    })
-
 @app.route('/stop_user_session', methods=['POST'])
 def stop_user_session():
     data = request.json or {}
@@ -528,44 +545,27 @@ def stop_user_session():
 def start_proxy():
     app.run(host='0.0.0.0', port=PROXY_PORT, debug=False, use_reloader=False, threaded=True)
 
-# ==================== WEBHOOK HANDLER ====================
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    """Handle incoming Telegram updates"""
-    try:
-        data = request.get_json(force=True)
-        print(f"[Webhook] Received update: {data.get('update_id')}")
-        
-        # Process the update
-        threading.Thread(target=process_update, args=(data,), daemon=True).start()
-        
-        return jsonify({"status": "ok"}), 200
-    except Exception as e:
-        print(f"[Webhook] Error: {e}")
-        return jsonify({"status": "error"}), 500
-
+# ==================== PROCESS UPDATE ====================
 def process_update(data):
     """Process Telegram update"""
     try:
-        # Handle callback query (button clicks)
         if 'callback_query' in data:
             handle_callback(data['callback_query'])
             return
         
-        # Handle message
         if 'message' in data:
             handle_message(data['message'])
     except Exception as e:
         print(f"[Process] Error: {e}")
+        import traceback
+        traceback.print_exc()
 
 # ==================== BOT HANDLERS ====================
 def handle_message(message):
-    """Handle incoming messages"""
     chat_id = message['chat']['id']
     text = message.get('text', '')
     user_id = str(message['from']['id'])
     
-    # Check if user is in credential input mode
     if user_data.get(user_id, {}).get('awaiting_credentials'):
         if text.lower() == '/cancel':
             user_data[user_id]['awaiting_credentials'] = False
@@ -586,7 +586,6 @@ def handle_message(message):
         user_data[user_id]['awaiting_credentials'] = False
         return
     
-    # Handle commands
     if text == '/start':
         send_start(chat_id, user_id)
     elif text == '/login':
@@ -599,7 +598,6 @@ def handle_message(message):
         tg_send_message(chat_id, "Use /start to begin.")
 
 def send_start(chat_id, user_id):
-    """Send start message"""
     has_session = user_id in user_sessions
     
     keyboard = {
@@ -627,7 +625,6 @@ def send_start(chat_id, user_id):
     )
 
 def send_login_prompt(chat_id, user_id):
-    """Send login prompt"""
     user_data[user_id] = {'awaiting_credentials': True}
     tg_send_message(
         chat_id,
@@ -639,8 +636,6 @@ def send_login_prompt(chat_id, user_id):
     )
 
 def process_credentials(chat_id, user_id, uid, password):
-    """Process login credentials"""
-    # Check existing session
     if user_id in user_sessions:
         tg_send_message(
             chat_id,
@@ -712,7 +707,6 @@ def process_credentials(chat_id, user_id, uid, password):
     )
 
 def stop_session(chat_id, user_id):
-    """Stop user session"""
     if user_id not in user_sessions:
         tg_send_message(chat_id, "ℹ️ No active session found.")
         return
@@ -743,7 +737,6 @@ def stop_session(chat_id, user_id):
         tg_send_message(chat_id, f"❌ Error: {e}")
 
 def send_help(chat_id):
-    """Send help message"""
     tg_send_message(
         chat_id,
         "🤖 *FF ULTRA PROXY BOT*\n\n"
@@ -762,7 +755,6 @@ def send_help(chat_id):
     )
 
 def handle_callback(callback):
-    """Handle callback queries (button clicks)"""
     callback_id = callback['id']
     chat_id = callback['message']['chat']['id']
     user_id = str(callback['from']['id'])
@@ -791,7 +783,6 @@ def handle_callback(callback):
 
 # ==================== SET WEBHOOK ====================
 def set_webhook():
-    """Set webhook for the bot"""
     webhook_url = f"{PUBLIC_URL}/webhook"
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook"
     params = {"url": webhook_url}
@@ -830,7 +821,6 @@ def main():
     
     print("🤖 Bot is running with webhook!")
     
-    # Keep the server running
     try:
         while True:
             time.sleep(60)
