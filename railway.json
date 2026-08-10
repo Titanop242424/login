@@ -1,7 +1,0 @@
-{
-  "deploy": {
-    "startCommand": "backend.py",
-    "healthcheckPath": "/health",
-    "healthcheckTimeout": 100
-  }
-}
