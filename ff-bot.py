@@ -1,27 +1,30 @@
 #!/usr/bin/env python3
 """
-🎮 FF ULTRA PROXY BOT - RAW API (FIXED WEBHOOK)
-- Fixed 404 error
-- All routes working
+🎮 FF ULTRA PROXY BOT - RENDER READY
+- Single session per user
+- Hardcoded configuration
+- localconfig.json method
 """
 
 import os, sys, json, time, random, string, base64, hashlib, threading, re, logging, socket
 from datetime import datetime
 from flask import Flask, request, Response, jsonify
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad, unpad
 import requests, urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ==================== HARDCODED CONFIG ====================
 BOT_TOKEN = "8700162861:AAEWqnAGTKB4Nofx133IS2qFHKmu6zfo0PM"
-PUBLIC_URL = "https://ff-ultra-proxy.up.railway.app"
+PUBLIC_URL = "https://YOUR-APP-NAME.onrender.com"  # CHANGE THIS AFTER DEPLOY!
 API_URL = "http://metro.proxy.rlwy.net:18992/jwt"
 
 CLIENT_SECRET = "2ee44819e9b4598845141067b281621874d0d5d7af9d8f7e00c1e54715b7d1e3"
 PROXY_PORT = int(os.environ.get("PORT", 5031))
 AES_KEY = b'Yg&tc%DEuh6%Zc^8'
 AES_IV = b'6oyZDr22E3ychjM%'
+
+# ==================== Crypto Imports ====================
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
 
 print(f"📡 Running on port: {PROXY_PORT}")
 print(f"📡 Public URL: {PUBLIC_URL}")
@@ -314,23 +317,10 @@ sessions = {}
 user_sessions = {}
 user_data = {}
 
-# ==================== ROOT ROUTE ====================
-@app.route('/', methods=['GET', 'POST'])
-def root():
-    return jsonify({
-        "status": "online",
-        "bot": "FF ULTRA PROXY BOT",
-        "public_url": PUBLIC_URL,
-        "webhook_url": f"{PUBLIC_URL}/webhook"
-    })
-
 # ==================== WEBHOOK ROUTE ====================
-@app.route('/webhook', methods=['POST', 'GET'])
+@app.route('/webhook', methods=['POST'])
 def webhook():
     """Handle incoming Telegram updates"""
-    if request.method == 'GET':
-        return jsonify({"status": "webhook endpoint", "method": "GET"}), 200
-    
     try:
         data = request.get_json(force=True)
         print(f"[Webhook] Received update: {data.get('update_id', 'unknown')}")
@@ -342,6 +332,16 @@ def webhook():
     except Exception as e:
         print(f"[Webhook] Error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 200
+
+# ==================== ROOT ROUTE ====================
+@app.route('/', methods=['GET'])
+def root():
+    return jsonify({
+        "status": "online",
+        "bot": "FF ULTRA PROXY BOT",
+        "public_url": PUBLIC_URL,
+        "webhook_url": f"{PUBLIC_URL}/webhook"
+    })
 
 # ==================== HEALTH ROUTE ====================
 @app.route('/health', methods=['GET'])
@@ -541,9 +541,6 @@ def stop_user_session():
         return jsonify({"status": "stopped"})
     
     return jsonify({"error": "No active session found"}), 404
-
-def start_proxy():
-    app.run(host='0.0.0.0', port=PROXY_PORT, debug=False, use_reloader=False, threaded=True)
 
 # ==================== PROCESS UPDATE ====================
 def process_update(data):
@@ -802,31 +799,21 @@ def set_webhook():
 
 # ==================== MAIN ====================
 def main():
-    print("🎮 FF ULTRA PROXY BOT - RAW API")
+    print("🎮 FF ULTRA PROXY BOT - RENDER READY")
     print(f"🔌 Port: {PROXY_PORT}")
     print(f"📡 Public URL: {PUBLIC_URL}")
     print(f"🛡️ Proxy Headers: STRIPPED")
     print(f"📦 Method: localconfig.json")
     print(f"👤 Single Session Per User: ✅")
     
-    # Start proxy in background
-    proxy_thread = threading.Thread(target=start_proxy, daemon=True)
-    proxy_thread.start()
-    time.sleep(2)
-    print(f"✅ Proxy running on port {PROXY_PORT}")
-    
     # Set webhook
-    time.sleep(1)
+    time.sleep(2)
     set_webhook()
     
     print("🤖 Bot is running with webhook!")
     
-    try:
-        while True:
-            time.sleep(60)
-    except KeyboardInterrupt:
-        print("\n👋 Stopped")
-        sys.exit(0)
+    # Start Flask app
+    app.run(host='0.0.0.0', port=PROXY_PORT, debug=False, threaded=True)
 
 if __name__ == '__main__':
     try:
