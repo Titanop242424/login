@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-🎮 FF PROXY BACKEND - RAILWAY READY
+🎮 FF PROXY BACKEND - RAILWAY READY (FIXED PB2)
 - Handles all proxy traffic
 - Session management
 - Header stripping
-- Always on
+- Fixed PB2 import
 """
 
 import os, sys, json, time, random, base64, hashlib, threading, re, logging
@@ -26,14 +26,20 @@ print(f"📡 Backend running on port: {PROXY_PORT}")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ==================== IMPORT PB2 FILES ====================
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'Pb2'))
+# ==================== IMPORT PB2 FILES (FIXED) ====================
+# Add the Pb2 folder to Python path
+PB2_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Pb2')
+if os.path.exists(PB2_PATH):
+    sys.path.insert(0, PB2_PATH)
+    print(f"📁 Pb2 path: {PB2_PATH}")
+else:
+    print(f"⚠️ Pb2 folder not found at: {PB2_PATH}")
 
 USE_PB2 = False
 try:
-    from Pb2 import MajoRLoGinrEq_pb2
-    from Pb2 import MajoRLoGinrEs_pb2
-    from Pb2 import PorTs_pb2
+    from MajoRLoGinrEq_pb2 import MajorLogin
+    from MajoRLoGinrEs_pb2 import MajorLoginRes
+    from PorTs_pb2 import GetLoginData
     USE_PB2 = True
     print("✅ PB2 loaded successfully")
 except ImportError as e:
@@ -78,7 +84,7 @@ def encrypt_proto(data):
 def build_major_login_proto(open_id, access_token, region="IND"):
     if USE_PB2:
         try:
-            major_login = MajoRLoGinrEq_pb2.MajorLogin()
+            major_login = MajorLogin()
             
             major_login.event_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             major_login.game_name = "free fire"
@@ -147,6 +153,7 @@ def build_major_login_proto(open_id, access_token, region="IND"):
         except Exception as e:
             print(f"PB2 error: {e}")
     
+    # Fallback - simple protobuf
     return build_simple_proto(open_id, access_token, region)
 
 def build_simple_proto(open_id, access_token, region="IND"):
@@ -193,7 +200,7 @@ def parse_major_login_response(data):
     try:
         if USE_PB2:
             try:
-                response = MajoRLoGinrEs_pb2.MajorLoginRes()
+                response = MajorLoginRes()
                 response.ParseFromString(data)
                 if response.token:
                     return response.token
@@ -212,6 +219,16 @@ def parse_major_login_response(data):
 app = Flask(__name__)
 sessions = {}
 user_sessions = {}
+
+# ==================== ROOT ROUTE ====================
+@app.route('/', methods=['GET'])
+def root():
+    return jsonify({
+        "status": "online",
+        "backend": "FF PROXY BACKEND",
+        "pb2": "✅" if USE_PB2 else "⚠️",
+        "active_sessions": len(sessions)
+    })
 
 # ==================== PROXY HANDLER ====================
 @app.route('/', methods=['GET', 'POST', 'PUT', 'DELETE'])
@@ -401,7 +418,8 @@ def health():
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "active_sessions": len(sessions),
-        "active_users": len(user_sessions)
+        "active_users": len(user_sessions),
+        "pb2": "✅" if USE_PB2 else "⚠️"
     })
 
 @app.route('/stats', methods=['GET'])
